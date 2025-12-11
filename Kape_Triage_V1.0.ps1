@@ -76,19 +76,15 @@ with minimal analyst interaction.
     Run from an elevated PowerShell session:
 
         PS C:\> .\Run-KapeTriage.ps1
+        PS C:\> .\Run-KapeTriage.ps1 -CaseId "IR-2025-001" -OperatorName "J.Doe"
 
-    The script will:
-        1. Detect the USB root path
-        2. Locate kape.exe
-        3. Create a case folder (timestamp + hostname)
-        4. Generate a wrapper script for KAPE execution
-        5. Register and launch a SYSTEM-level scheduled task
-        6. Store logs and output on the USB media
+    If metadata is not supplied, reasonable defaults are generated automatically
+    (e.g. CaseId based on date/hostname, OperatorName from the current user).
 
 .OUTPUT
     CASE-<timestamp>-<hostname>\
         ├── runlog.txt           # Text-based execution log
-        ├── runlog.json          # Structured JSON log
+        ├── runlog.json          # Structured JSON log (incl. chain-of-custody)
         ├── KAPE_Task_Wrapper.ps1
         └── KAPE output (incl. VHDX if configured)
 
@@ -113,6 +109,15 @@ with minimal analyst interaction.
 
 #>
 
+param(
+    [string]$CaseId,
+    [string]$IncidentId,
+    [string]$OperatorName,
+    [string]$OperatorId,
+    [string]$AuthorisationRef,
+    [string]$EvidenceDeviceId,
+    [string]$Notes
+)
 
 # ---------- Helper Functions ----------
 function Get-UsbRoot {
@@ -148,16 +153,43 @@ function Find-KapeOnUSB {
 # ---------- Main Script ----------
 Ensure-Admin
 
-$usbRoot = Get-UsbRoot
+$usbRoot   = Get-UsbRoot
+$driveId   = $usbRoot.TrimEnd('\')
+$hostName  = $env:COMPUTERNAME
+$userName  = $env:USERNAME
+
 Write-Verbose "USB root detected: $usbRoot"
+
+# Automatic defaults for optional metadata (no prompts, no interaction)
+if (-not $CaseId) {
+    $CaseId = ("AUTO-{0}-{1}" -f (Get-Date -Format "yyyyMMddHHmmss"), $hostName)
+}
+if (-not $OperatorName) {
+    $OperatorName = if ($userName) { $userName } else { "Unknown" }
+}
+if (-not $OperatorId) {
+    $OperatorId = if ($env:USERDOMAIN -and $userName) {
+        "$($env:USERDOMAIN)\$userName"
+    } else {
+        $OperatorName
+    }
+}
+if (-not $AuthorisationRef) {
+    $AuthorisationRef = "AUTO"
+}
+if (-not $EvidenceDeviceId) {
+    $EvidenceDeviceId = $driveId
+}
+if (-not $Notes) {
+    $Notes = ""
+}
 
 # Find KAPE executable
 $kapeExe = Find-KapeOnUSB -UsbRoot $usbRoot
 
 # Build output folder
-$timestamp = (Get-Date).ToString("yyyyMMdd-HHmm")
-$systemName = $env:COMPUTERNAME
-$caseFolder = "CASE-$timestamp-$systemName"
+$timestamp  = (Get-Date).ToString("yyyyMMdd-HHmm")
+$caseFolder = "CASE-$timestamp-$hostName"
 $outputPath = Join-Path $usbRoot $caseFolder
 New-Item -Path $outputPath -ItemType Directory -Force | Out-Null
 Write-Verbose "Output folder created: $outputPath"
@@ -167,12 +199,12 @@ $kapeArgs = @(
     "--tsource C:",
     "--tdest `"$outputPath`"",
     "--target !SANS_Triage",
-    "--vhdx ${systemName}_Triage",
+    "--vhdx ${hostName}_Triage",
     "--zv false"
 ) -join " "
 
 # Scheduled task info
-$taskName = "Portable-KAPE-Task-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+$taskName    = "Portable-KAPE-Task-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
 $description = "Portable KAPE triage task (background, auditable)"
 
 # Create wrapper script for the scheduled task
@@ -182,7 +214,14 @@ param(
     [string]`$KapeExe,
     [string]`$KapeArgs,
     [string]`$OutputPath,
-    [string]`$TaskName
+    [string]`$TaskName,
+    [string]`$CaseId,
+    [string]`$IncidentId,
+    [string]`$OperatorName,
+    [string]`$OperatorId,
+    [string]`$AuthorisationRef,
+    [string]`$EvidenceDeviceId,
+    [string]`$Notes
 )
 
 # Logging helpers
@@ -206,49 +245,73 @@ function Write-JsonLog {
 }
 
 try {
-    `$startTime = Get-Date
-    `$usbRoot   = Split-Path `$OutputPath -Qualifier
+    `$startTimeUtc = [DateTime]::UtcNow
+    `$startTime    = Get-Date
+    `$usbRoot      = Split-Path `$OutputPath -Qualifier
+
+    `$chainOfCustody = [pscustomobject]@{
+        CaseId              = `$CaseId
+        IncidentId          = `$IncidentId
+        OperatorName        = `$OperatorName
+        OperatorId          = `$OperatorId
+        AuthorisationRef    = `$AuthorisationRef
+        EvidenceDeviceId    = `$EvidenceDeviceId
+        Hostname            = `$env:COMPUTERNAME
+        AcquisitionStartUtc = `$startTimeUtc.ToString("o")
+        AcquisitionEndUtc   = `$null
+        ScriptVersion       = "1.3.0"
+        Notes               = `$Notes
+    }
 
     Write-Log "Wrapper started. KAPE exe: `$KapeExe"
     Write-JsonLog @{
-        event      = "start"
-        time       = `$startTime.ToString("o")
-        kape       = `$KapeExe
-        system     = `$env:COMPUTERNAME
-        outputPath = `$OutputPath
-        usbRoot    = `$usbRoot
-        taskName   = `$TaskName
+        event          = "start"
+        time           = `$startTime.ToString("o")
+        kape           = `$KapeExe
+        system         = `$env:COMPUTERNAME
+        outputPath     = `$OutputPath
+        usbRoot        = `$usbRoot
+        taskName       = `$TaskName
+        chainOfCustody = `$chainOfCustody
     }
 
     # Start KAPE process (hidden window, background)
     `$proc = Start-Process -FilePath `$KapeExe -ArgumentList `$KapeArgs -WindowStyle Hidden -Wait -PassThru
     `$exitCode = `$proc.ExitCode
 
-    `$endTime = Get-Date
+    `$endTimeUtc = [DateTime]::UtcNow
+    `$endTime    = Get-Date
+
+    `$chainOfCustody.AcquisitionEndUtc = `$endTimeUtc.ToString("o")
+
     Write-Log "KAPE finished. ExitCode=`$exitCode"
     Write-JsonLog @{
-        event      = "end"
-        time       = `$endTime.ToString("o")
-        exitCode   = `$exitCode
-        duration   = (New-TimeSpan `$startTime `$endTime).ToString()
-        outputPath = `$OutputPath
-        usbRoot    = `$usbRoot
-        taskName   = `$TaskName
+        event          = "end"
+        time           = `$endTime.ToString("o")
+        exitCode       = `$exitCode
+        duration       = (New-TimeSpan `$startTime `$endTime).ToString()
+        outputPath     = `$OutputPath
+        usbRoot        = `$usbRoot
+        taskName       = `$TaskName
+        chainOfCustody = `$chainOfCustody
     }
 
 } catch {
-    `$err     = `$_.Exception.Message
-    `$usbRoot = Split-Path `$OutputPath -Qualifier
+    `$err       = `$_.Exception.Message
+    `$usbRoot   = Split-Path `$OutputPath -Qualifier
+    `$errorTime = Get-Date
 
     Write-Log "Error during KAPE execution: `$err"
     Write-JsonLog @{
         event      = "error"
-        time       = (Get-Date).ToString("o")
+        time       = `$errorTime.ToString("o")
         message    = `$err
         stack      = `$_.Exception.StackTrace
         outputPath = `$OutputPath
         usbRoot    = `$usbRoot
         taskName   = `$TaskName
+        caseId     = `$CaseId
+        incidentId = `$IncidentId
     }
 }
 "@
@@ -267,7 +330,14 @@ $wrapperArgs = @(
     "-KapeExe", "`"$kapeExe`"",
     "-KapeArgs", "`"$kapeArgs`"",
     "-OutputPath", "`"$outputPath`"",
-    "-TaskName", "`"$taskName`""
+    "-TaskName", "`"$taskName`"",
+    "-CaseId", "`"$CaseId`"",
+    "-IncidentId", "`"$IncidentId`"",
+    "-OperatorName", "`"$OperatorName`"",
+    "-OperatorId", "`"$OperatorId`"",
+    "-AuthorisationRef", "`"$AuthorisationRef`"",
+    "-EvidenceDeviceId", "`"$EvidenceDeviceId`"",
+    "-Notes", "`"$Notes`""
 ) -join " "
 
 $action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wrapperArgs
