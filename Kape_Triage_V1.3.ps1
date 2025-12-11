@@ -207,6 +207,9 @@ $kapeArgs = @(
 $taskName    = "Portable-KAPE-Task-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
 $description = "Portable KAPE triage task (background, auditable)"
 
+# Path to log scheduler issues (outside wrapper)
+$schedulerLog = Join-Path $outputPath "scheduler_error.txt"
+
 # Create wrapper script for the scheduled task
 $wrapperPath = Join-Path $outputPath "KAPE_Task_Wrapper.ps1"
 $wrapperContent = @"
@@ -345,20 +348,24 @@ $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 
 try {
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Description $description -Force
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Description $description -Force -ErrorAction Stop | Out-Null
     Write-Verbose "Scheduled task '$taskName' created."
 } catch {
-    Write-Error "Failed to register scheduled task: $_"
-    exit 1
+    $msg = "[{0}] Failed to register scheduled task '{1}': {2}" -f (Get-Date), $taskName, $_.Exception.Message
+    Add-Content -Path $schedulerLog -Value $msg
+    # Do NOT rethrow – avoids PS2EXE popup
+    return
 }
 
 # Start the scheduled task immediately (still silent for the user)
 try {
-    Start-ScheduledTask -TaskName $taskName
+    Start-ScheduledTask -TaskName $taskName -ErrorAction Stop | Out-Null
     Write-Verbose "Scheduled task started successfully."
 } catch {
-    Write-Error "Failed to start scheduled task: $_"
-    exit 1
+    $msg = "[{0}] Failed to start scheduled task '{1}': {2}" -f (Get-Date), $taskName, $_.Exception.Message
+    Add-Content -Path $schedulerLog -Value $msg
+    # Do NOT rethrow – avoids PS2EXE popup
+    return
 }
 
 Write-Verbose "KAPE will run via the scheduled task. Output and logs will be in: $outputPath"
