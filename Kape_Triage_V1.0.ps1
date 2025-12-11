@@ -1,24 +1,116 @@
 <#
-#################################################################################################
-# Script Name:     Scheduled Task for KAPE Execution
-# Author:          Greaton Forensics 
-# Email:           Admin@greaton.co.uk
-# Version:         1.0
-# Description:     This script automates the execution of the SANS Triage process using KAPE 
-#                  (Kroll Artifact Parser and Extractor). It validates the paths, creates a 
-#                  scheduled task, and executes KAPE with pre-defined arguments to capture a 
-#                  forensic triage image. The task runs with SYSTEM privileges and starts 
-#                  immediately after registration for a stealthy and efficient operation.
-# Usage:           Run this script with Administrator privileges.
-#################################################################################################
-# Pre-requisites:
-# - Administrator Privileges
-# - PowerShell 5.1 or later
-# - KAPE tools present in the specified folder structure
-#################################################################################################
-# DISCLAIMER:
-# This script is provided "as-is" without warranty of any kind. Use it at your own risk.
-#################################################################################################
+.SYNOPSIS
+Automated forensic triage acquisition using KAPE with scheduled task execution.
+
+.DESCRIPTION
+This script performs a controlled, auditable forensic triage acquisition using
+the Kroll Artifact Parser and Extractor (KAPE). It:
+
+    - Identifies the location of kape.exe on the removable media
+    - Builds a case-specific output directory on the USB device
+    - Generates a wrapper script to execute KAPE with predefined arguments
+    - Registers and starts a one-time scheduled task running as SYSTEM
+    - Logs execution metadata (timestamps, exit codes, errors)
+
+All evidence and logs remain on the removable media to support evidence
+segregation and portability. The workflow is intended for incident response
+and DFIR operations where rapid, consistent triage acquisition is required
+with minimal analyst interaction.
+
+.AUTHOR
+    Greaton Forensics
+    Contact: Admin@greaton.co.uk
+
+.VERSION
+    Script Version : 1.3.0
+    Release Date   : 2025-01-01
+    Release Status : Stable
+
+.COMPLIANCE (ISO 27001 ALIGNMENT)
+    This script is designed to support technical and procedural controls commonly
+    associated with an ISO/IEC 27001-aligned Information Security Management System
+    (ISMS), including but not limited to:
+
+        - A.6.1.2  : Segregation of duties
+        - A.12.1   : Change management (through documented versioning)
+        - A.12.4   : Logging and monitoring (runlog.txt / runlog.json)
+        - A.12.5   : Control of operational software (controlled deployment & use)
+        - A.16.1   : Management of information security incidents
+        - A.18.1.3 : Protection of records (forensic logs and case evidence)
+
+    IMPORTANT:
+        - This script alone does not constitute ISO 27001 compliance.
+        - It is a technical control to be used within a documented ISMS
+          with appropriate policies, procedures, and governance.
+
+.CHAIN_OF_CUSTODY
+    This script can form part of a wider chain-of-custody process by generating
+    consistent, timestamped logs and case directories. It is recommended that
+    each execution is associated with clearly defined metadata, such as:
+
+        - CaseId              : External or internal case reference
+        - IncidentId          : Incident / ticket reference
+        - OperatorName        : Analyst / responder executing the script
+        - OperatorId          : Internal analyst ID (if applicable)
+        - AuthorisationRef    : Legal / management authorisation reference
+        - EvidenceDeviceId    : Identifier / serial of removable media
+        - Hostname            : Target system name
+        - AcquisitionStartUtc : Start timestamp (UTC)
+        - AcquisitionEndUtc   : End timestamp (UTC)
+        - ScriptVersion       : As per .VERSION above
+        - Notes               : Free-text for contextual details
+
+    Best practice:
+        - Mirror this metadata in a formal chain-of-custody form.
+        - Ensure removable media is uniquely labelled and tracked.
+        - Store logs (runlog.txt / runlog.json) as part of the case record.
+
+.REQUIREMENTS
+    - Administrative privileges (enforced at runtime)
+    - PowerShell 5.1 or later
+    - KAPE executable (kape.exe) present on the USB media
+    - Windows Task Scheduler available and functional
+    - Sufficient free storage on removable media for triage output
+
+.USAGE
+    Run from an elevated PowerShell session, optionally providing case metadata:
+
+        PS C:\> .\Run-KapeTriage.ps1
+
+    The script will:
+        1. Detect the USB root path
+        2. Locate kape.exe
+        3. Create a case folder (timestamp + hostname)
+        4. Generate a wrapper script for KAPE execution
+        5. Register and launch a SYSTEM-level scheduled task
+        6. Store logs and output on the USB media
+
+.OUTPUT
+    CASE-<timestamp>-<hostname>\
+        ├── runlog.txt           # Text-based execution log
+        ├── runlog.json          # Structured JSON log
+        ├── KAPE_Task_Wrapper.ps1
+        └── KAPE output (incl. VHDX if configured)
+
+.DISCLAIMER
+    This script is provided "as is" without any warranties, express or implied,
+    including but not limited to the implied warranties of merchantability,
+    fitness for a particular purpose, or non-infringement.
+
+    Greaton Forensics and the author accept no responsibility or liability for:
+        - Misuse of this script
+        - Improper or unauthorised forensic acquisition
+        - Data loss, business interruption, or system impact
+
+    Use of this script is only permitted where legally authorised. It is the
+    operator’s responsibility to ensure compliance with all applicable laws,
+    regulations, contracts, and organisational policies before execution.
+
+.NOTES
+    Purpose     : Portable, repeatable, auditable forensic triage acquisition
+    Privilege   : Must be executed from an elevated PowerShell session
+    IntendedUse : DFIR / IR operations under appropriate legal authority
+
 #>
 
 
