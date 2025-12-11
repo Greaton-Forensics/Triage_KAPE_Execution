@@ -1,82 +1,233 @@
-# 📜 Disclaimer  
+# Portable KAPE Triage Automation
 
-This script is designed to **automate the execution of KAPE (Kroll Artifact Parser and Extractor)** as a scheduled task, running discreetly in the background for forensic triage purposes.  
+**Stealth, Auditable, ISO-Aligned DFIR Collection Toolkit**
 
-## ⚠️ Important Notes  
+------------------------------------------------------------------------
 
-- This script is **independently developed** to automate the scheduling and execution of KAPE.  
-- **All credit for KAPE** goes to **Eric Zimmerman**, the original creator of this powerful forensic tool.  
-- KAPE is **maintained and distributed by Kroll**. More details can be found at:  
-  📌 **[KAPE Official Repository](https://github.com/EricZimmerman/KapeFiles)**  
+## 📌 Overview
 
-By using this script, you acknowledge that **KAPE is a third-party tool** and that this project merely facilitates its execution through automation.  
+This project provides a fully portable, self-contained, and auditable
+forensic triage automation tool built around **KAPE (Kroll Artifact
+Parser and Extractor)**.
 
----
+Designed for **incident responders, DFIR analysts, and field
+operators**, the tool executes a silent triage acquisition using a
+SYSTEM-level scheduled task and stores all evidence on the removable
+media it is executed from.
 
-# 🚀 Scheduled Task for KAPE Execution  
+Once compiled to an `.exe`, the tool can be launched directly from a USB
+drive without installers, external dependencies, or user interaction.
 
-![PowerShell](https://img.shields.io/badge/PowerShell-7.1-blue)  
-![License](https://img.shields.io/badge/License-MIT-green)  
-![Version](https://img.shields.io/badge/Version-1.0-brightgreen)  
+------------------------------------------------------------------------
 
-## 🔍 Overview  
+## 🚀 Key Features
 
-This PowerShell script automates the execution of the [**Kroll Artifact Parser and Extractor (KAPE)**](https://www.kroll.com/en/services/cyber-risk/incident-response-litigation-support/kroll-artifact-parser-extractor-kape#form716). The script validates required paths, creates a scheduled task, and executes a pre-defined KAPE command with elevated privileges.  
+### ✔ Fully Portable
 
-It is **designed to run discreetly in the background**, enabling rapid forensic triage with minimal disruption to the system.  
+Runs directly from a USB pendrive. Automatically detects its own drive
+letter, regardless of how Windows assigns it.
 
----
+### ✔ Stealth Mode (No Popups / No GUI / No User Impact)
 
-## 🎯 Purpose  
+-   Runs entirely in the background\
+-   Uses hidden PowerShell processes\
+-   No GUI elements\
+-   No console window interaction\
+-   No prompts or user interruptions
 
-The primary aim of this script is to **automate the SANS Triage image process** and execute it stealthily in the background.  
+### ✔ Automatic Metadata & Chain-of-Custody Logging
 
-By leveraging this script, forensic investigators can:  
-- ✅ Obtain a forensic triage image with **minimal user interaction**.  
-- ✅ Seamlessly execute the triage process in the background with **low visibility**.  
-- ✅ Speed up the collection of **critical forensic artifacts** while logged in as an administrator.  
+Automatically logs:
 
-This solution is ideal for **scenarios requiring rapid triage and minimal system disruption**.  
+-   Case ID (auto-generated unless provided)\
+-   Operator name (auto-detected from environment)\
+-   Incident reference\
+-   Authorisation reference\
+-   Evidence device ID\
+-   Hostname\
+-   UTC timestamps\
+-   Script version
 
----
+Results stored in:
 
-## 🔑 Key Features  
+    runlog.txt  
+    runlog.json
 
-✔️ **Dynamic Drive Detection** – Automatically locates the drive containing the KAPE tools, eliminating the need for hardcoded paths.  
-✔️ **Stealth Operation** – Runs discreetly in the background to avoid disrupting system activity.  
-✔️ **System Privileges** – Creates a scheduled task running under the **SYSTEM account** with the highest privileges.  
-✔️ **Customisable Arguments** – Supports user-defined arguments for **flexible KAPE command execution**.  
-✔️ **Error Handling** – Implements robust validation to ensure all prerequisites are met before execution.  
-✔️ **Professional Logging** – Provides clear and actionable feedback for errors and successful execution.  
+### ✔ ISO 27001-Aligned Controls
 
----
+Supports DFIR workflows and processes aligned to:
 
-## ⚙️ Usage  
+-   A.12.4 -- Logging and Monitoring\
+-   A.12.5 -- Control of Operational Software\
+-   A.16.1 -- Incident Management\
+-   A.18.1.3 -- Protection of Records
 
-### 📌 Pre-requisites  
+### ✔ Automatic Case Folder Handling
 
-1. **Administrator Privileges** – The script requires elevated permissions to run.  
-2. **PowerShell 5.1 or Later** – Ensure compatibility with the required PowerShell version.  
-3. **KAPE Tools** – KAPE must be available in the expected folder structure.  
-4. **Windows Task Scheduler Enabled** – Required for creating and managing scheduled tasks.  
+    CASE-<YYYYMMDD-HHMM>-<HOSTNAME>```
 
----
+    ### ✔ SYSTEM-Level Background Execution  
 
-### 🛠️ Execution Steps  
+    ### ✔ Dynamic KAPE Discovery  
+    Searches up to 6 directory levels for `kape.exe`.
 
-1. Clone the repository or download the script.  
-2. Run the script in PowerShell with **elevated privileges**.  
-3. The script will:  
-   - 🔹 Locate the drive containing the KAPE tools.  
-   - 🔹 Validate the presence of `kape.exe` in the expected folder.  
-   - 🔹 Create and register a **scheduled task** with predefined arguments.  
-   - 🔹 Start the task immediately after **successful registration**.  
+    ---
 
----
+    ## 📂 Directory Structure
 
-## 💻 Example Command  
+USB_DRIVE:  │ RunTriage.exe\
+│\
+└── CASE-20250101-1210-HOST123  ├── runlog.txt\
+├── runlog.json\
+├── KAPE_Task_Wrapper.ps1\
+└── `<KAPE Output / VHDX>`{=html}
 
-The script uses the following KAPE arguments by default:  
 
-```plaintext
---tsource C: --tdest [Drive]:\GKape_Hun13r --target !SANS_Triage --vhdx Hun13r_Triage --zv false --gui
+    ---
+
+    ## 🛠️ Usage
+
+    ### Silent Mode (Recommended)
+
+RunTriage.exe
+
+
+    ### With Optional Metadata
+
+RunTriage.exe -CaseId "IR-2025-001" -OperatorName "J.Doe"
+
+
+    Metadata fields are optional — defaults are auto-generated.
+
+    ---
+
+    ## 🔒 Chain-of-Custody Logging
+
+    Example JSON entry:
+
+    ```json
+    {
+      "CaseId": "AUTO-20250101-HOST123",
+      "OperatorName": "jdoe",
+      "AuthorisationRef": "AUTO",
+      "EvidenceDeviceId": "E:",
+      "Hostname": "HOST123",
+      "AcquisitionStartUtc": "...",
+      "AcquisitionEndUtc": "...",
+      "ScriptVersion": "1.3.0"
+    }
+
+------------------------------------------------------------------------
+
+## 📜 Important Notes
+
+This automation script is **independently developed** to streamline and
+operationalise the execution of **KAPE** in DFIR workflows.
+
+### 👑 Credit to the Original Creator
+
+**All credit for KAPE goes to its author, Eric Zimmerman**, the original
+creator of this exceptional forensic triage tool.
+
+### 🏢 KAPE Maintainer
+
+KAPE is maintained and distributed by **Kroll**, who continue to enhance
+and support the tool.
+
+Official KAPE repository and downloads:
+
+👉 https://www.kroll.com/en/services/cyber-risk/eric-zimmerman-tools
+
+Always obtain KAPE from official, trusted sources.
+
+------------------------------------------------------------------------
+
+## 🧩 Configuration & Extensibility
+
+The script can be extended to:
+
+-   Add organisation-specific metadata fields\
+-   Modify KAPE targets\
+-   Encrypt output\
+-   Add offloading to network shares\
+-   Integrate automated case numbering schemes
+
+------------------------------------------------------------------------
+
+## 🖥️ System Requirements
+
+-   Windows 10 / 11 / Windows Server\
+-   PowerShell 5.1+\
+-   Administrator privileges\
+-   KAPE on the same USB drive
+
+------------------------------------------------------------------------
+
+## 📦 Compiling to EXE
+
+Recommended tools:
+
+-   **PS2EXE**\
+-   **PowerShell Pro Tools**\
+-   **SAPIEN PowerShell Studio**
+
+Key notes:
+
+✔ USB detection works identically\
+✔ Stealth mode preserved\
+✔ No hardcoded paths needed\
+✔ KAPE still auto-discovered
+
+------------------------------------------------------------------------
+
+## 👤 Author
+
+**Greaton Forensics**\
+📧 Admin@greaton.co.uk
+
+------------------------------------------------------------------------
+
+## ⚖️ Legal Disclaimer
+
+This software is provided *"as-is"* without warranty of any kind.\
+Use is restricted to legally authorised forensic, security, or incident
+response activities.
+
+The author and Greaton Forensics assume no liability for:
+
+-   Misuse\
+-   Unauthorised acquisition\
+-   Data loss\
+-   System impact
+
+Ensure compliance with all applicable laws and organisational policies.
+
+------------------------------------------------------------------------
+
+## 🔐 Ethical Use
+
+This tool must only be used with:
+
+-   Proper authorisation\
+-   Documented investigative scope\
+-   A lawful mandate\
+-   Appropriate approvals
+
+Any misuse is strictly prohibited.
+
+------------------------------------------------------------------------
+
+## ⭐ Final Notes
+
+This tool is designed to be:
+
+-   Stealthy\
+-   Reliable\
+-   Court-defensible\
+-   Portable\
+-   Enterprise-ready\
+-   Field-operable
+
+If you require additional documentation files (LICENSE, CHANGELOG,
+CONTRIBUTING, architecture diagrams), they can be generated upon
+request.
