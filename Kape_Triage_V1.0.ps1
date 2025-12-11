@@ -73,7 +73,7 @@ with minimal analyst interaction.
     - Sufficient free storage on removable media for triage output
 
 .USAGE
-    Run from an elevated PowerShell session, optionally providing case metadata:
+    Run from an elevated PowerShell session:
 
         PS C:\> .\Run-KapeTriage.ps1
 
@@ -134,10 +134,10 @@ function Ensure-Admin {
 
 function Find-KapeOnUSB {
     param([string]$UsbRoot)
-    Write-Host "Searching for kape.exe on USB..."
+    Write-Verbose "Searching for kape.exe on USB root: $UsbRoot"
     $kape = Get-ChildItem -Path $UsbRoot -Filter "kape.exe" -Recurse -ErrorAction SilentlyContinue -Depth 6
     if ($kape) {
-        Write-Host "KAPE found at: $($kape[0].FullName)"
+        Write-Verbose "KAPE found at: $($kape[0].FullName)"
         return $kape[0].FullName
     } else {
         Write-Error "KAPE executable not found on USB: $UsbRoot"
@@ -149,7 +149,7 @@ function Find-KapeOnUSB {
 Ensure-Admin
 
 $usbRoot = Get-UsbRoot
-Write-Host "USB root detected: $usbRoot"
+Write-Verbose "USB root detected: $usbRoot"
 
 # Find KAPE executable
 $kapeExe = Find-KapeOnUSB -UsbRoot $usbRoot
@@ -160,21 +160,20 @@ $systemName = $env:COMPUTERNAME
 $caseFolder = "CASE-$timestamp-$systemName"
 $outputPath = Join-Path $usbRoot $caseFolder
 New-Item -Path $outputPath -ItemType Directory -Force | Out-Null
-Write-Host "Output folder created: $outputPath"
+Write-Verbose "Output folder created: $outputPath"
 
-# Build KAPE arguments (visible)
+# Build KAPE arguments (stealthy: no GUI)
 $kapeArgs = @(
     "--tsource C:",
     "--tdest `"$outputPath`"",
     "--target !SANS_Triage",
     "--vhdx ${systemName}_Triage",
-    "--zv false",
-    "--gui"
+    "--zv false"
 ) -join " "
 
 # Scheduled task info
 $taskName = "Portable-KAPE-Task-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
-$description = "Portable KAPE triage task (visible, auditable)"
+$description = "Portable KAPE triage task (background, auditable)"
 
 # Create wrapper script for the scheduled task
 $wrapperPath = Join-Path $outputPath "KAPE_Task_Wrapper.ps1"
@@ -208,31 +207,61 @@ function Write-JsonLog {
 
 try {
     `$startTime = Get-Date
-    Write-Log "Wrapper started. KAPE exe: `$KapeExe"
-    Write-JsonLog @{ event="start"; time=`$startTime.ToString("o"); kape=`$KapeExe; system=`$env:COMPUTERNAME }
+    `$usbRoot   = Split-Path `$OutputPath -Qualifier
 
-    # Start KAPE process (visible)
-    `$proc = Start-Process -FilePath `$KapeExe -ArgumentList `$KapeArgs -Wait -PassThru
+    Write-Log "Wrapper started. KAPE exe: `$KapeExe"
+    Write-JsonLog @{
+        event      = "start"
+        time       = `$startTime.ToString("o")
+        kape       = `$KapeExe
+        system     = `$env:COMPUTERNAME
+        outputPath = `$OutputPath
+        usbRoot    = `$usbRoot
+        taskName   = `$TaskName
+    }
+
+    # Start KAPE process (hidden window, background)
+    `$proc = Start-Process -FilePath `$KapeExe -ArgumentList `$KapeArgs -WindowStyle Hidden -Wait -PassThru
     `$exitCode = `$proc.ExitCode
 
     `$endTime = Get-Date
     Write-Log "KAPE finished. ExitCode=`$exitCode"
-    Write-JsonLog @{ event="end"; time=`$endTime.ToString("o"); exitCode=`$exitCode; duration=(New-TimeSpan `$startTime `$endTime).ToString() }
+    Write-JsonLog @{
+        event      = "end"
+        time       = `$endTime.ToString("o")
+        exitCode   = `$exitCode
+        duration   = (New-TimeSpan `$startTime `$endTime).ToString()
+        outputPath = `$OutputPath
+        usbRoot    = `$usbRoot
+        taskName   = `$TaskName
+    }
 
 } catch {
-    `$err = `$_.Exception.Message
+    `$err     = `$_.Exception.Message
+    `$usbRoot = Split-Path `$OutputPath -Qualifier
+
     Write-Log "Error during KAPE execution: `$err"
-    Write-JsonLog @{ event="error"; time=(Get-Date).ToString("o"); message=`$err; stack=`$_.Exception.StackTrace }
+    Write-JsonLog @{
+        event      = "error"
+        time       = (Get-Date).ToString("o")
+        message    = `$err
+        stack      = `$_.Exception.StackTrace
+        outputPath = `$OutputPath
+        usbRoot    = `$usbRoot
+        taskName   = `$TaskName
+    }
 }
 "@
 
 # Save wrapper script
 $wrapperContent | Out-File -FilePath $wrapperPath -Encoding UTF8 -Force
-Write-Host "Wrapper script created at: $wrapperPath"
+Write-Verbose "Wrapper script created at: $wrapperPath"
 
-# Create scheduled task (visible)
+# Create scheduled task (stealth: hidden PowerShell window)
 $wrapperArgs = @(
     "-NoProfile",
+    "-WindowStyle", "Hidden",
+    "-NonInteractive",
     "-ExecutionPolicy", "Bypass",
     "-File", "`"$wrapperPath`"",
     "-KapeExe", "`"$kapeExe`"",
@@ -241,25 +270,25 @@ $wrapperArgs = @(
     "-TaskName", "`"$taskName`""
 ) -join " "
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wrapperArgs
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+$action    = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $wrapperArgs
+$trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 
 try {
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Description $description -Force
-    Write-Host "Scheduled task '$taskName' created and will run shortly."
+    Write-Verbose "Scheduled task '$taskName' created."
 } catch {
     Write-Error "Failed to register scheduled task: $_"
     exit 1
 }
 
-# Start the scheduled task immediately
+# Start the scheduled task immediately (still silent for the user)
 try {
     Start-ScheduledTask -TaskName $taskName
-    Write-Host "Scheduled task started successfully."
+    Write-Verbose "Scheduled task started successfully."
 } catch {
     Write-Error "Failed to start scheduled task: $_"
     exit 1
 }
 
-Write-Host "KAPE will run via the scheduled task. Output and logs will be in: $outputPath"
+Write-Verbose "KAPE will run via the scheduled task. Output and logs will be in: $outputPath"
